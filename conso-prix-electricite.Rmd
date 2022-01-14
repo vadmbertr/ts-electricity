@@ -1,0 +1,36 @@
+---
+title: "Consommation et prix de l'électricité"
+author: "Vadim BERTRAND, Kassim KONE"
+output: pdf_document
+---
+
+```{r setup, include = F}
+knitr::opts_chunk$set(echo = T, message = F, warning = F, results = F)
+knitr::opts_chunk$set(fig.width = 16, fig.height = 8)
+```
+
+```{r}
+library(dplyr)
+load("data/swap-elec.Rda")
+```
+
+# 1. Analyse descriptive
+
+```{r}
+elec.swap.daily.df <- elec.swap.df %>%
+  na.omit() %>%
+  mutate(year = year(datetime)) %>%
+  mutate(month = month(datetime)) %>%
+  mutate(day = day(datetime)) %>%
+  group_by(year, month, day) %>%
+  summarise(swap = mean(swap, na.rm = T)) %>%
+  ungroup()
+elec.swap.monthly.df <- elec.swap.daily.df %>%
+  group_by(year, month) %>%
+  summarise(swap = mean(swap, na.rm = T)) %>%
+  ungroup()
+elec.swap.yearly.df <- elec.swap.daily.df %>%
+  group_by(year) %>%
+  summarise(swap = mean(swap, na.rm = T)) %>%
+  ungroup()
+```
