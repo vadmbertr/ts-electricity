@@ -17,6 +17,7 @@ knitr::opts_chunk$set(fig.width = 16, fig.height = 8)
 library(dplyr)
 library(lubridate)
 load("data/swap-elec.Rda")
+load("data/conso-elec.Rda")
 ```
 
 \newpage
@@ -29,7 +30,9 @@ load("data/swap-elec.Rda")
 # Introduction
 
 Nous avons choisi d'observer les prix de l'électricité sur le marché boursier français (données SWAP) et la consommation enregistrée d'électricité en France. Les données que nous utilisons proviennent de RTE (le gestionnaire français du Réseau de Transport d'Electricité) pour la période 2015 - 2021. \
-Le pas des données SWAP est horaire, tandis que celui des données de consommation est le quart d'heure. Il est très probable que nous utilisions un pas plus grand.
+Le pas des données SWAP est horaire, tout comme celui des données de consommation.
+
+Notre étude s'intéressera tout d'abord à la détection de tendance et de saisonnalité dans nos séries temporelles. Dans un second temps nous tenterons de proposer un modèle permettant d'estimer et de prédire convenablement ces séries. Enfin nous essaierons d'identifier un lien entre les deux séries.
 
 ```{r}
 elec.swap.daily.df <- elec.swap.df %>%
@@ -48,15 +51,33 @@ elec.swap.yearly.df <- elec.swap.daily.df %>%
   group_by(year) %>%
   summarise(swap = mean(swap, na.rm = T)) %>%
   ungroup()
+
+
+elec.conso.daily.df <- elec.conso.df %>%
+  na.omit() %>%
+  mutate(year = year(datetime)) %>%
+  mutate(month = month(datetime)) %>%
+  mutate(day = day(datetime)) %>%
+  group_by(year, month, day) %>%
+  summarise(conso = mean(conso, na.rm = T)) %>%
+  ungroup()
+elec.conso.monthly.df <- elec.conso.daily.df %>%
+  group_by(year, month) %>%
+  summarise(conso = mean(conso, na.rm = T)) %>%
+  ungroup()
+elec.conso.yearly.df <- elec.conso.daily.df %>%
+  group_by(year) %>%
+  summarise(conso = mean(conso, na.rm = T)) %>%
+  ungroup()
 ```
 
-# 1. Analyse descriptive
+# 1. Analyse de la tendance et de la saisonnalité
 
 ```{r, fig.cap = "Variations du prix de l'électricité pour différents pas"}
 elec.swap.hourly.ts <- ts(elec.swap.df$swap, start = c(2015, 1), 
-                          freq = 365 * 24)
+                          freq = 365.25 * 24)
 elec.swap.daily.ts <- ts(elec.swap.daily.df$swap, start = c(2015, 1), 
-                         freq = 365)
+                         freq = 365.25)
 elec.swap.monthly.ts <- ts(elec.swap.monthly.df$swap, start = c(2015, 1), 
                            freq = 12)
 elec.swap.yearly.ts <- ts(elec.swap.yearly.df$swap, start = 2015, freq = 1)
@@ -68,5 +89,20 @@ plot(elec.swap.yearly.ts, main = "Pas annuel")
 ```
 
 Visuellement jusqu'en 2021 le prix de l'énergie semble suivre une tendance plutôt stable, avec une saisonnalité qui pourrait être mensuelle ou trimenstrielle. \
-A partir de 2021 en revanche la tendance se rapproche d'une exponentielle. Il faudra se demander si nous conservons ces données par la suite. \
+A partir de 2021 en revanche la tendance se rapproche d'une exponentielle. Peut-être que pour obtenir un modèle satisfaisant il nous faudra ne pas considérer les données de 2021. \
 A la fin de l'année 2016 nous voyons qu'il y a eu de forts pics très ponctuels, uniquement visibles au pas horaire. Nous pouvons nous demander s'il y a eu des évènements particuliers à cette période.
+
+```{r, fig.cap = "Variations de la consommation en électricité pour différents pas"}
+elec.conso.hourly.ts <- ts(elec.conso.df$conso, start = c(2015, 1),
+                           freq = 365.25 * 24)
+elec.conso.daily.ts <- ts(elec.conso.daily.df$conso, start = c(2015, 1),
+                          freq = 365.25)
+elec.conso.monthly.ts <- ts(elec.conso.monthly.df$conso, start = c(2015, 1),
+                            freq = 12)
+elec.conso.yearly.ts <- ts(elec.conso.yearly.df$conso, start = 2015, freq = 1)
+par(mfrow = c(2, 2))
+plot(elec.conso.hourly.ts, main = "Pas horaire")
+plot(elec.conso.daily.ts, main = "Pas journalier")
+plot(elec.conso.monthly.ts, main = "Pas mensuel")
+plot(elec.conso.yearly.ts, main = "Pas annuel")
+```
