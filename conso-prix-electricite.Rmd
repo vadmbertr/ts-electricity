@@ -15,6 +15,7 @@ knitr::opts_chunk$set(fig.width = 16, fig.height = 8)
 
 ```{r}
 library(dplyr)
+library(ggpubr)
 library(lubridate)
 load("data/swap-elec.Rda")
 load("data/conso-elec.Rda")
@@ -81,6 +82,7 @@ elec.swap.daily.ts <- ts(elec.swap.daily.df$swap, start = c(2015, 1),
 elec.swap.monthly.ts <- ts(elec.swap.monthly.df$swap, start = c(2015, 1), 
                            freq = 12)
 elec.swap.yearly.ts <- ts(elec.swap.yearly.df$swap, start = 2015, freq = 1)
+
 par(mfrow = c(2, 2))
 plot(elec.swap.hourly.ts, main = "Pas horaire")
 plot(elec.swap.daily.ts, main = "Pas journalier")
@@ -100,9 +102,78 @@ elec.conso.daily.ts <- ts(elec.conso.daily.df$conso, start = c(2015, 1),
 elec.conso.monthly.ts <- ts(elec.conso.monthly.df$conso, start = c(2015, 1),
                             freq = 12)
 elec.conso.yearly.ts <- ts(elec.conso.yearly.df$conso, start = 2015, freq = 1)
+
 par(mfrow = c(2, 2))
 plot(elec.conso.hourly.ts, main = "Pas horaire")
 plot(elec.conso.daily.ts, main = "Pas journalier")
 plot(elec.conso.monthly.ts, main = "Pas mensuel")
 plot(elec.conso.yearly.ts, main = "Pas annuel")
 ```
+
+Nous remarquons que la tendance semble légèrement décroissante, mis à part 2020 qui connait une forte chute en raison du COVID-19 ; et qu'une saisonnalité se dégage : pendant les mois d'hiver la consommation augmente.
+
+```{r}
+elec.swap.hourly.med.df <- elec.swap.df %>%
+  na.omit() %>%
+  mutate(hour = hour(datetime)) %>%
+  group_by(hour) %>%
+  summarise(swap = median(swap, na.rm = T)) %>%
+  ungroup()
+elec.swap.daily.med.df <- elec.swap.df %>%
+  na.omit() %>%
+  mutate(wday = ((wday(datetime)-2)%%7)+1) %>%
+  group_by(wday) %>%
+  summarise(swap = median(swap, na.rm = T)) %>%
+  ungroup()
+
+elec.conso.hourly.med.df <- elec.conso.df %>%
+  na.omit() %>%
+  mutate(hour = hour(datetime)) %>%
+  group_by(hour) %>%
+  summarise(conso = median(conso, na.rm = T)) %>%
+  ungroup()
+elec.conso.daily.med.df <- elec.conso.df %>%
+  na.omit() %>%
+  mutate(wday = ((wday(datetime)-2)%%7)+1) %>%
+  group_by(wday) %>%
+  summarise(conso = median(conso, na.rm = T)) %>%
+  ungroup()
+```
+```{r, fig.cap = "Médiane du prix et de la consommation d'électricité par heure et par jour de la semaine"}
+swap.h.axis <- c(min(elec.swap.hourly.med.df), max(elec.swap.hourly.med.df))
+swap.d.axis <- c(min(elec.swap.daily.med.df), max(elec.swap.daily.med.df))
+conso.h.axis <- c(min(elec.conso.hourly.med.df), max(elec.conso.hourly.med.df))
+conso.d.axis <- c(min(elec.conso.daily.med.df), max(elec.conso.daily.med.df))
+
+hours.b <- diff(swap.h.axis) / diff(conso.h.axis)
+hours.a <- swap.h.axis[1] - hours.b * conso.h.axis[1]
+days.b <- diff(swap.d.axis) / diff(conso.d.axis)
+days.a <- swap.d.axis[1] - days.b * conso.d.axis[1]
+
+hours.lines <- ggplot() + 
+  geom_line(data = elec.swap.hourly.med.df, aes(x = hour, y = swap, 
+                                                color = "Prix")) + 
+  geom_line(data = elec.conso.hourly.med.df, 
+            aes(x = hour, y = hours.a + conso * hours.b, 
+                color = "Consommation")) +
+  scale_y_continuous("Prix", sec.axis = sec_axis(~ (. - hours.a)/hours.b, 
+                                                 name = "Consommation")) +
+  scale_x_continuous("Heure") + 
+  scale_color_manual(values =  c("Prix" = "red", "Consommation" = "blue"),
+                     name = "Légende")
+days.lines <- ggplot() + 
+  geom_line(data = elec.swap.daily.med.df, aes(x = wday, y = swap, 
+                                               color = "Prix")) + 
+  geom_line(data = elec.conso.daily.med.df, 
+            aes(x = wday, y = days.a + conso * days.b, 
+                color = "Consommation")) +
+  scale_y_continuous("Prix", sec.axis = sec_axis(~ (. - days.a)/days.b, 
+                                                 name = "Consommation")) +
+  scale_x_continuous("Jour de la semaine") + 
+  scale_color_manual(values =  c("Prix" = "red", "Consommation" = "blue"),
+                     name = "Légende")
+ggarrange(hours.lines, days.lines, ncol = 2, nrow = 1, 
+          common.legend = T, legend = "bottom")
+```
+
+
