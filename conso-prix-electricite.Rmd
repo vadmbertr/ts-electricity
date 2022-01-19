@@ -18,6 +18,7 @@ library(dplyr)
 library(forecast)
 library(ggpubr)
 library(lubridate)
+library(zoo)
 load("data/swap-elec.Rda")
 load("data/conso-elec.Rda")
 ```
@@ -31,79 +32,111 @@ load("data/conso-elec.Rda")
 
 # Introduction
 
-Nous avons choisi d'observer les prix de l'électricité sur le marché boursier français (données SWAP) et la consommation électrique en France. Les données que nous utilisons proviennent de RTE (le gestionnaire français du Réseau de Transport d'Electricité) pour la période 2015 - 2021. \
-Le pas des données SWAP est horaire, tout comme celui des données de consommation.
-
-Notre étude s'intéressera tout d'abord à la détection de tendance et de saisonnalité dans nos séries temporelles. Dans un second temps nous tenterons de proposer un modèle permettant d'estimer et de prédire convenablement ces séries. Enfin nous essaierons d'identifier un lien entre les deux séries.
-
-# 1. Analyse de la tendance et de la saisonnalité
-
-#### 1.1. Prix de l'électricité \
-
-Sur la _Figure 1_ nous avons représenté les variations du prix de l'électricité entre 2015 et 2021 pour différents pas. \
-Visuellement jusqu'en 2021 le prix de l'énergie semble suivre une tendance plutôt stable, avec une saisonnalité qui pourrait être mensuelle ou trimenstrielle. \
-A partir de 2021 en revanche la tendance se rapproche d'une exponentielle. Peut-être que pour obtenir un modèle satisfaisant il nous faudra ne pas considérer les données de 2021. \
-A la fin de l'année 2016 nous voyons qu'il y a eu de forts pics très ponctuels, uniquement visibles au pas horaire. Nous pouvons nous demander s'il y a eu des évènements particuliers à cette période.
+Nous avons choisi d'observer les prix de l'électricité sur le marché boursier français (données SWAP) et la consommation électrique en France. Nous avons obtennu ces données entre 2015 et 2021 via RTE (le gestionnaire français du Réseau de Transport d'Electricité). \
+Nous avons exclu les années 2020 et 2021 de l'étude en raison de la crise du COVID-19 qui a entraîné une forte chute en 2020 et de la crise énergétique dans laquelle nous nous trouvons actuellement, démarrée en 2021, qui  a engendré une hausse spectaculaire du prix de l'électricité, comme nous pouvons le voir sur la _Figure 1_. \
+Le pas des données de prix est horaire, tout comme celui des données de consommation.
 
 ```{r}
-elec.swap.daily.df <- elec.swap.df %>%
-  na.omit() %>%
-  mutate(year = year(datetime)) %>%
-  mutate(month = month(datetime)) %>%
-  mutate(day = day(datetime)) %>%
-  group_by(year, month, day) %>%
-  summarise(swap = mean(swap, na.rm = T)) %>%
-  ungroup()
-elec.swap.monthly.df <- elec.swap.daily.df %>%
-  group_by(year, month) %>%
-  summarise(swap = mean(swap, na.rm = T)) %>%
-  ungroup()
-elec.swap.yearly.df <- elec.swap.daily.df %>%
-  group_by(year) %>%
-  summarise(swap = mean(swap, na.rm = T)) %>%
-  ungroup()
-
-elec.swap.hourly.ts <- ts(elec.swap.df$swap, start = c(2015, 1), 
-                          freq = 365.25 * 24)
-elec.swap.daily.ts <- ts(elec.swap.daily.df$swap, start = c(2015, 1), 
-                         freq = 365.25)
-elec.swap.monthly.ts <- ts(elec.swap.monthly.df$swap, start = c(2015, 1), 
-                           freq = 12)
-elec.swap.yearly.ts <- ts(elec.swap.yearly.df$swap, start = 2015, freq = 1)
+elec.swap.full.df <- elec.swap.df
+elec.swap.df <- elec.swap.df %>%
+  filter(year(datetime) < 2020)
+elec.conso.full.df <- elec.conso.df
+elec.conso.df <- elec.conso.df %>%
+  filter(year(datetime) < 2020)
+avg_days <- (365 * 4 + 366 * 1) / 5
 ```
-```{r, fig.cap = "Variations du prix de l'électricité pour différents pas"}
+
+```{r, fig.cap = "Variations lissées du prix et de la consommation de l'électricité entre 2015 et 2021"}
+g1 <- autoplot(ts(rollmean(elec.swap.full.df$swap, (365 * 5 + 366 * 2) / 7 * 24, na.rm = T), 
+                  start = c(2015, 1), freq = (365 * 5 + 366 * 2) / 7 * 24)) +
+  ylab("Prix") +
+  xlab("Année") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"))
+g2 <- autoplot(ts(rollmean(elec.conso.full.df$conso, (365 * 5 + 366 * 2) / 7 * 24), 
+                  start = c(2015, 1), freq = (365 * 5 + 366 * 2) / 7 * 24)) +
+  ylab("Consommation") +
+  xlab("Année") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"))
+ggarrange(g1, g2, ncol = 2)
+```
+
+Pour chacune des deux séries temporelles, notre étude s'intéressera tout d'abord à la détection de tendance et de saisonnalité, puis au choix d'un modèle permettant d'estimer et de prédire convenablement ces séries. Enfin nous essaierons d'identifier un lien entre les deux séries.
+
+# 1. Prix de l'électricité
+
+```{r}
+# NA imputation
+impute.values <- elec.swap.df %>%
+  na.omit() %>%
+  mutate(month = month(datetime)) %>%
+  mutate(wday = wday(datetime)) %>%
+  mutate(hour = hour(datetime)) %>%
+  group_by(month, wday, hour) %>%
+  summarise(swap.imputed = median(swap, na.rm = T)) %>%
+  ungroup()
+elec.swap.df <- elec.swap.df %>%
+  mutate(month = month(datetime)) %>%
+  mutate(wday = wday(datetime)) %>%
+  mutate(hour = hour(datetime)) %>%
+  left_join(impute.values, by = c("month", "wday", "hour")) %>%
+  select(c(datetime, swap, swap.imputed))
+elec.swap.df$swap <- ifelse(is.na(elec.swap.df$swap), 
+                            elec.swap.df$swap.imputed, elec.swap.df$swap)
+elec.swap.df <- elec.swap.df %>%
+  select(-swap.imputed)
+```
+
+```{r}
+elec.swap.hourly.ts <- ts(elec.swap.df$swap, start = c(2015, 1), 
+                          freq = avg_days * 24)
+elec.swap.daily.ts <- ma(elec.swap.hourly.ts, 24)
+elec.swap.monthly.ts <- ma(elec.swap.hourly.ts, round(24 * avg_days / 12))
+elec.swap.yearly.ts <- ma(elec.swap.hourly.ts, round(24 * avg_days))
+```
+
+## 1.1. Analyse descriptive
+
+Sur la _Figure 2_ nous avons représenté les variations du prix de l'électricité entre 2015 et 2019 selon différents lissages. \
+Visuellement le prix de l'énergie semble suivre une tendance plutôt stable, et possède une saisonnalité évidente. \
+A la fin de l'année 2016 nous voyons qu'il y a eu de forts pics très ponctuels, uniquement visibles sans lissage. Nous pouvons nous demander s'il y a eu des évènements particuliers à cette période.
+
+```{r, fig.cap = "Variations du prix de l'électricité avec différents lissages"}
 gh <- autoplot(elec.swap.hourly.ts) +
   ylab("Prix") +
   xlab("Année") +
-  ggtitle("Pas horaire") +
+  ggtitle("Sans lissage") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
         axis.line = element_line(colour = "black"))
 gd <- autoplot(elec.swap.daily.ts) +
   ylab("Prix") +
   xlab("Année") +
-  ggtitle("Pas journalier") +
+  ggtitle("Journalier") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
         axis.line = element_line(colour = "black"))
 gm <- autoplot(elec.swap.monthly.ts) +
   ylab("Prix") +
   xlab("Année") +
-  ggtitle("Pas mensuel") +
+  ggtitle("Mensuel") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
         axis.line = element_line(colour = "black"))
 ga <- autoplot(elec.swap.yearly.ts) +
   ylab("Prix") +
   xlab("Année") +
-  ggtitle("Pas annuel") +
+  ggtitle("Annuel") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
         axis.line = element_line(colour = "black"))
 ggarrange(gh, gd, gm, ga, nrow = 2, ncol = 2)
 ```
 
-Il est possible que cette série possède plusieurs saisonnalités, aussi nous avons illustré sur la _Figure 2_ la valeur médiane pour chaque heure de la journée, chaque jour de la semaine et chaque mois de l'année. \
+Il est possible que cette série possède plusieurs saisonnalités, aussi nous avons illustré sur la _Figure 3_ la valeur médiane pour chaque heure de la journée, chaque jour de la semaine et chaque mois de l'année. \
 Nous remarquons qu'en effet trois saisonnalités semblent exister et méritent d'être considérées : horaire, hebdomadaire et mensuelle.
 
 ```{r}
@@ -160,70 +193,260 @@ gm <- ggplot() +
 ggarrange(gh, ggarrange(gd, gm, ncol = 2, nrow = 1), ncol = 1, nrow = 2)
 ```
 
-#### 1.2. Consommation électrique \
+## 1.2. Analyse des composantes déterministes : tendance et saisonnalité(s)
 
-Nous remarquons sur la _Figure 3_ que la tendance de la consommation électrique semble légèrement décroissante, mis à part 2020 qui connait une forte chute en raison du COVID-19 ; et qu'une saisonnalité se dégage : pendant les mois d'hiver la consommation augmente.
+Afin de considérer les saisonnalités journalière et hebdomadaire en plus de la saisonnalité mensuelle nous avons appliqué une décomposition utilisant _loess_. Par ailleurs cela a également permis d'être robuste aux valeurs extrêmes de fin 2016. \
+La _Figure 4_ donne à voir deux décompositions sur différentes périodes. Sur 2015-2019 nous observons bien la saisonnalité mensuelle et la tendance légèrement décroissante et fluctuante, en revanche les saisonnalités journalières et hebdomadaire ne sont pas visibles en raison de leur fréquence trop grande. Nous avons donc ajouté la décomposition sur la période de mars 2015 qui les met en évidence.
 
 ```{r}
-elec.conso.daily.df <- elec.conso.df %>%
+elec.swap.multi.ts <- msts(elec.swap.df$swap, start = c(2015, 1), 
+                           seasonal.periods = c(24, 7 * 24, avg_days * 24))
+mstl.swap.res <- mstl(elec.swap.multi.ts, s.window = "periodic", robust = T)
+mstl.swap.subset <- mstl.swap.res[(24*(31+28)):(24*(31+28+31)),]
+class(mstl.swap.subset) <- class(mstl.swap.res)
+```
+
+```{r, fig.height = 16, fig.cap = "Décomposition via loess"}
+g1 <- autoplot(mstl.swap.res) +
+  ggtitle("Sur la période 2015-2019")
+g2 <- autoplot(mstl.swap.subset) +
+  ggtitle("Sur le mois de mars 2015")
+ggarrange(g1, g2, nrow = 2)
+```
+
+## 1.3. Comparaison de différents modèles d'estimation
+
+Maintenant que nous avons caractérisé la partie déterministe du signal nous allons expérimenter plusieurs modèles d'estimation. Pour ce faire nous avons diviser notre série en un jeu d'entrainement (de janvier 2015 à novembre 2019 inclus) et un jeu de test (décembre 2019) et nous évaluerons la performance des modèles en calculant la racine de l'erreur moyenne quadratique sur les données de test.
+
+### 1.3.1. Cas uni-saisonnier
+
+```{r}
+h <- 12
+elec.swap.monthly.df <- elec.swap.df %>%
   na.omit() %>%
   mutate(year = year(datetime)) %>%
   mutate(month = month(datetime)) %>%
-  mutate(day = day(datetime)) %>%
-  group_by(year, month, day) %>%
-  summarise(conso = mean(conso, na.rm = T)) %>%
-  ungroup()
-elec.conso.monthly.df <- elec.conso.daily.df %>%
   group_by(year, month) %>%
-  summarise(conso = mean(conso, na.rm = T)) %>%
+  summarise(swap = mean(swap, na.rm = T)) %>%
   ungroup()
-elec.conso.yearly.df <- elec.conso.daily.df %>%
-  group_by(year) %>%
-  summarise(conso = mean(conso, na.rm = T)) %>%
-  ungroup()
-
-elec.conso.hourly.ts <- ts(elec.conso.df$conso, start = c(2015, 1),
-                           freq = 365.25 * 24)
-elec.conso.daily.ts <- ts(elec.conso.daily.df$conso, start = c(2015, 1),
-                          freq = 365.25)
-elec.conso.monthly.ts <- ts(elec.conso.monthly.df$conso, start = c(2015, 1),
-                            freq = 12)
-elec.conso.yearly.ts <- ts(elec.conso.yearly.df$conso, start = 2015, freq = 1)
+elec.swap.monthly.ts <- ts(elec.swap.monthly.df$swap, start = c(2015, 1), 
+                           freq = 12)
+elec.swap.monthly.ts.train <- head(elec.swap.monthly.ts,
+                                   length(elec.swap.monthly.ts) - h)
+elec.swap.monthly.ts.test <- tail(elec.swap.monthly.ts, h)
 ```
 
-```{r, fig.cap = "Variations de la consommation électrique pour différents pas"}
+Nous démarrons par un cas "simple", à savoir la considération d'une seule tendance, ici la tendance mensuelle.
+
+#### Buys-Ballot
+Intéressons nous à la prédiction en utilisant un modèle linéaire tenant compte de la tendance et de la saisonnalité : Buys-Ballot.
+
+```{r}
+bb.mod <- tslm(elec.swap.monthly.ts.train ~ trend + season)
+bb.pred <- forecast(bb.mod, h = h)
+bb.acc <- accuracy(bb.pred, elec.swap.monthly.ts.test)
+```
+
+La _Table 1_ montre que l'erreur obtenue est assez importante : de l'ordre de 16€.
+
+```{r, results = T}
+knitr::kable(bb.acc, caption = "Erreurs avec Buys-Ballot")
+```
+
+Sur la _Figure 5_ nous pouvons voir que le modèle a sur-estimé le prix de l'électricité pour l'année 2019.
+
+```{r, fig.cap = "Prédiction avec Buys-Ballot"}
+autoplot(bb.pred) +
+  autolayer(bb.pred$mean, series = "Prediction") +
+  autolayer(fitted(bb.mod), series = "Estimation") + 
+  autolayer(elec.swap.monthly.ts.train, series = "Entrainement") +
+  autolayer(elec.swap.monthly.ts.test, series = "Test") +
+  guides(colour=guide_legend(title="Séries")) +
+  xlab("Année") +
+  ylab("Prix") +
+  ggtitle("")
+```
+
+L'ACF des résidus visible _Figure 6_ montre clairement que le modèle n'a pas correctement intégré la composante déterministique saisonnière des données.
+
+```{r, fig.cap = "Résidus avec Buys-Ballot"}
+checkresiduals(bb.pred)
+```
+
+#### Holt-Winters
+Afin d'aller au dela de l'approche linéaire nous pouvons utiliser le modèle d'Holt-Winters qui permet de mieux tenir compte de l'évolution de la tendance ou de la saisonnalié de la série.
+
+```{r}
+hw.mod <- HoltWinters(elec.swap.monthly.ts.train)
+hw.pred <- forecast(hw.mod, h = h)
+hw.acc <- accuracy(hw.pred, elec.swap.monthly.ts.test)
+```
+
+Nous pouvons voir sur la _Table 2_ montre que l'erreur faite par Holt-Winters est d'environ 13€, ce qui est mieux que précédement, mais toujours élevé relativement à l'ordre de grandeur de la série.
+
+```{r, results = T}
+knitr::kable(hw.acc, caption = "Erreurs avec Hols-Winters")
+```
+
+Sur la _Figure 7_ nous pouvons voir qu'à nouveau le modèle à sur-estimé le prix.
+
+```{r, fig.cap = "Prédiction avec Hols-Winters"}
+autoplot(hw.pred) +
+  autolayer(hw.pred$mean, series = "Prediction") +
+  autolayer(fitted(hw.mod), series = "Estimation") + 
+  autolayer(elec.swap.monthly.ts.train, series = "Entrainement") +
+  autolayer(elec.swap.monthly.ts.test, series = "Test") +
+  guides(colour=guide_legend(title="Séries")) +
+  xlab("Année") +
+  ylab("Prix") +
+  ggtitle("")
+```
+
+La _Figure 8_ permet de voir que le modèle à cette fois-ci correctement capturé la saisonnalité.
+
+```{r, fig.cap = "Résidus avec Hols-Winters"}
+checkresiduals(hw.pred)
+```
+
+#### ARIMA
+Enfin nous avons souahité expérimenter le modèle ARIMA qui propose une approche différente reposant sur l'autocorrélation des données.
+
+```{r}
+am.mod <- Arima(elec.swap.monthly.ts.train, order=c(0,2,1), seasonal=c(0,1,2))
+am.pred <- forecast(am.mod, h = h)
+am.acc <- accuracy(am.pred, elec.swap.monthly.ts.test)
+```
+
+Nous pouvons voir sur la _Table 3_ que l'erreur inférieur à 10€ faite par le modèle ARIMA est bien plus faible qu'avec les autres modèles.
+
+```{r, results = T}
+knitr::kable(am.acc, caption = "Erreurs avec ARIMA")
+```
+
+Comme nous pouvons le constater sur la _Figure 9_, cette fois-ci le prix n'a été que très légèrement sur-estimé.
+
+```{r, fig.cap = "Prédiction avec ARIMA"}
+autoplot(am.pred) +
+  autolayer(am.pred$mean, series = "Prediction") +
+  autolayer(fitted(am.mod), series = "Estimation") + 
+  autolayer(elec.swap.monthly.ts.train, series = "Entrainement") +
+  autolayer(elec.swap.monthly.ts.test, series = "Test") +
+  guides(colour=guide_legend(title="Séries")) +
+  xlab("Année") +
+  ylab("Prix") +
+  ggtitle("")
+```
+
+La _Figure 10_ permet de voir que les résidus ressemblent nettement plus à un bruit blanc qu'auparavant.
+
+```{r, fig.cap = "Résidus avec ARIMA"}
+checkresiduals(am.pred)
+```
+
+L'ARIMA s'avère être le modèle uni-saisonnier proposant les meilleurs résultats parmi ce que nous avons évalué.
+
+### 1.3.2. Cas multi-saisonnier
+
+Nous pouvons également essayer de conserver une granulariré plus fine tout en utilisant les trois saisonnalités que nous avions détectées.
+
+```{r}
+h <- round(24 * avg_days)
+
+elec.swap.multi.ts.train <- head(elec.swap.multi.ts, 
+                                 length(elec.swap.multi.ts) - h)
+elec.swap.multi.ts.test <- tail(elec.swap.multi.ts, h)
+```
+
+#### STL
+Pour ce faire nous utilisons le modèle STL qui se base sur la prédiction de la série dé-saisonnalisée via _loess_ en utilisant un modèle non-saisonnier, ici le lissage exponentiel, puis en saisonnalisant à nouveau.
+
+```{r}
+stlm.mod <- stlm(elec.swap.multi.ts.train)
+stlm.pred <- forecast(stlm.mod, h = h)
+stlm.acc <- accuracy(stlm.pred, elec.swap.multi.ts.test)
+```
+
+Nous pouvons voir sur la _Table 4_ que l'erreur sur le jeu de test est bien plus grande que celle sur le jeu d'entrainement, ce qui suggère un sur-apprentissage. Cependant la valeur obtenue est plutôt satisfaisante étant donné que nous avons conservé la résolution horaire du jeu initial.
+
+```{r, results = T}
+knitr::kable(stlm.acc, caption = "Erreurs avec STL")
+```
+
+Comme nous pouvons le constater sur la _Figure 11_, l'estimation est très bonne, mais la prédiction un peu moins.
+
+```{r, fig.cap = "Prédiction avec STL"}
+g1 <- autoplot(head(stlm.pred$mean, 24*7), series = "Prediction") +
+  autolayer(tail(fitted(stlm.pred), 24*7), series = "Estimation") + 
+  autolayer(tail(elec.swap.multi.ts.train, 24*7), series = "Entrainement") +
+  autolayer(head(elec.swap.multi.ts.test, 24*7), series = "Test") +
+  guides(colour=guide_legend(title="Séries")) +
+  xlab("Année") +
+  ylab("Prix") +
+  ggtitle("")
+g2 <- autoplot(stlm.pred$mean, series = "Prediction") +
+  autolayer(fitted(stlm.pred), series = "Estimation") + 
+  autolayer(elec.swap.multi.ts.train, series = "Entrainement") +
+  autolayer(elec.swap.multi.ts.test, series = "Test") +
+  guides(colour=guide_legend(title="Séries")) +
+  xlab("Année") +
+  ylab("Prix") +
+  ggtitle("")
+ggarrange(g1, g2, nrow = 2, common.legend = T, legend = "bottom")
+```
+
+Comme nous pouvons le voir _Figure 12_, les résidus ne semblent plus contenir d'information, ce qui est positif.
+
+```{r, fig.cap = "Résidus avec STL"}
+checkresiduals(stlm.pred)
+```
+
+# 2. Consommation électrique
+
+## 2.1. Analyse descriptive
+
+Nous remarquons sur la _Figure 13_ que la tendance de la consommation électrique semble légèrement décroissante, et qu'une saisonnalité se dégage : pendant les mois d'hiver la consommation augmente.
+
+```{r}
+elec.conso.hourly.ts <- ts(elec.conso.df$conso, start = c(2015, 1), 
+                           freq = avg_days * 24)
+elec.conso.daily.ts <- ma(elec.conso.hourly.ts, 24)
+elec.conso.monthly.ts <- ma(elec.conso.hourly.ts, round(24 * avg_days / 12))
+elec.conso.yearly.ts <- ma(elec.conso.hourly.ts, round(24 * avg_days))
+```
+
+```{r, fig.cap = "Variations de la consommation électrique avec différents lissages"}
 gh <- autoplot(elec.conso.hourly.ts) +
   ylab("Consommation") +
   xlab("Année") +
-  ggtitle("Pas horaire") +
+  ggtitle("Sans lissage") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
         axis.line = element_line(colour = "black"))
 gd <- autoplot(elec.conso.daily.ts) +
   ylab("Consommation") +
   xlab("Année") +
-  ggtitle("Pas journalier") +
+  ggtitle("Journalier") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
         axis.line = element_line(colour = "black"))
 gm <- autoplot(elec.conso.monthly.ts) +
   ylab("Consommation") +
   xlab("Année") +
-  ggtitle("Pas mensuel") +
+  ggtitle("Mensuel") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
         axis.line = element_line(colour = "black"))
 ga <- autoplot(elec.conso.yearly.ts) +
   ylab("Consommation") +
   xlab("Année") +
-  ggtitle("Pas annuel") +
+  ggtitle("Annuel") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
         axis.line = element_line(colour = "black"))
 ggarrange(gh, gd, gm, ga, nrow = 2, ncol = 2)
 ```
 
-De même que pour le prix nous pouvons voir sur la _Figure 4_ que trois saisonnalités peuvent être explorées.
+De même que pour le prix nous pouvons voir sur la _Figure 14_ que trois saisonnalités peuvent être explorées.
 
 ```{r}
 elec.conso.hourly.med.df <- elec.conso.df %>%
@@ -279,9 +502,29 @@ gm <- ggplot() +
 ggarrange(gh, ggarrange(gd, gm, ncol = 2, nrow = 1), ncol = 1, nrow = 2)
 ```
 
-#### 1.3. Premiers liens \
+## 2.2. Analyse des composantes déterministes : tendance et saisonnalité(s)
 
-Blabla
+Nous avons repris le même graphique que dans la partie précédente concernant le prix. La _Figure 15_ confirme la présence des trois saisonnalités : quotidienne, hebdomadaire et mensuelle.
+
+```{r}
+elec.conso.multi.ts <- msts(elec.conso.df$conso, start = c(2015, 1), 
+                            seasonal.periods = c(24, 7 * 24, avg_days * 24))
+mstl.conso.res <- mstl(elec.conso.multi.ts, s.window = "periodic", robust = T)
+mstl.conso.subset <- mstl.conso.res[(24*(31+28)):(24*(31+28+31)),]
+class(mstl.conso.subset) <- class(mstl.conso.res)
+```
+
+```{r, fig.height = 16, fig.cap = "Décomposition via loess"}
+g1 <- autoplot(mstl.conso.res) +
+  ggtitle("Sur la période 2015-2019")
+g2 <- autoplot(mstl.conso.subset) +
+  ggtitle("Sur le mois de mars 2015")
+ggarrange(g1, g2, nrow = 2)
+```
+
+# 3. Liens entre prix et consommation d'électricité
+
+A développer...
 
 ```{r fig.cap = "Evolution jointe du prix et de la consommation d'électricité"}
 hours.c <- max(elec.conso.hourly.med.df) / max(elec.swap.hourly.med.df)
