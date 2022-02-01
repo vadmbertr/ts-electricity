@@ -353,13 +353,13 @@ stlm.pred <- forecast(stlm.mod, h = h)
 stlm.acc <- accuracy(stlm.pred, elec.conso.multi.ts.test)
 
 #tbats.mod <- tbats(elec.conso.multi.ts.train, use.trend = F, use.parallel = T)
-load("data/tbats.Rda")
+load("data/conso-tbats.Rda")
 tbats.pred <- forecast(tbats.mod, h = h)
 tbats.acc <- accuracy(tbats.pred, elec.conso.multi.ts.test)
 
-load("data/bestfourier.Rda")
+load("data/conso-bestfourier.Rda")
 #msar.mod <- auto.arima(elec.conso.multi.ts.train, seasonal = F, lambda = 0, xreg = fourier(elec.conso.multi.ts.train, K = as.matrix(bestijk)[1,]))
-load("data/msarma.Rda")
+load("data/conso-msarma.Rda")
 msar.pred <- forecast(msar.mod, h = h, xreg = fourier(elec.conso.multi.ts.train, 
                                                       K = as.matrix(bestijk)[1,], 
                                                       h = h))
