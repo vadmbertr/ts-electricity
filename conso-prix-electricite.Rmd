@@ -154,7 +154,7 @@ La _Figure 4_ présente deux décompositions : sur la période 2015-2019 nous ob
 ```{r}
 elec.conso.multi.ts <- msts(elec.conso.df$conso, start = c(2015, 1), 
                             seasonal.periods = c(24, 7 * 24, 
-                                                 length(elec.conso.df$conso)))
+                                                 length(elec.conso.df$conso)/5))
 mstl.conso.res <- mstl(elec.conso.multi.ts)
 mstl.conso.subset <- mstl.conso.res[(24*(31+28)):(24*(31+28+31)),]
 class(mstl.conso.subset) <- class(mstl.conso.res)
