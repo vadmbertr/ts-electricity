@@ -401,7 +401,7 @@ gzoom <- autoplot(tail(elec.conso.multi.ts.train, 24*7), series = "Entrainement"
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
         axis.line = element_line(colour = "black"))
-ggarrange(gglob, gzoom, nrow = 2, common.legend = T, legend = "middle")
+ggarrange(gglob, gzoom, nrow = 2, common.legend = T, legend = "bottom")
 ```
 
 # 2. Prix de l'électricité
