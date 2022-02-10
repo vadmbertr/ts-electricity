@@ -2,9 +2,12 @@
 title: \vspace{3in}Consommation et prix de l'électricité
 author: "Vadim BERTRAND, Kassim KONE"
 output:
-    pdf_document
+    pdf_document:
+        citation_package: biblatex
+bibliography: ts.bib
 header-includes:
     \usepackage{float}
+    \usepackage[backend=biber,style=numeric,sorting=none]{biblatex}
     \makeatletter\renewcommand*{\fps@figure}{H}\makeatother
 ---
 
@@ -148,7 +151,7 @@ ggarrange(gh, ggarrange(gd, gm, ncol = 2, nrow = 1), ncol = 1, nrow = 2)
 
 ## 1.2. Analyse des composantes déterministes : tendance et saisonnalité(s)
 
-Afin de considérer les saisonnalités journalière et hebdomadaire en plus de la saisonnalité annuelle nous avons appliqué la décomposition STL estimant successivement plusieurs composantes saisonnales en utilisant la méthode de régression _LOESS_. _LOESS_ estime dans un premier temps chaque point par une régression linéaire ou polynomiale faite sur une fenêtre glissante centrée et pénalisant les points utilisés dans la régression en fonction de leur distance au point d'estimation. L'opération est répétée en pénalisant cette fois-ci également par la distance entre la valeur initiale et la première estimation, ce qui permet de réduire la sensibilité aux valeurs anormales.
+Afin de considérer les saisonnalités journalière et hebdomadaire en plus de la saisonnalité annuelle nous avons appliqué la décomposition STL estimant successivement plusieurs composantes saisonnales en utilisant la méthode de régression _LOESS_ \cite{loess}. _LOESS_ estime dans un premier temps chaque point par une régression linéaire ou polynomiale faite sur une fenêtre glissante centrée et pénalisant les points utilisés dans la régression en fonction de leur distance au point d'estimation. L'opération est répétée en pénalisant cette fois-ci également par la distance entre la valeur initiale et la première estimation, ce qui permet de réduire la sensibilité aux valeurs anormales.
 
 ```{r}
 elec.conso.multi.ts <- msts(elec.conso.df$conso, start = c(2015, 1), 
@@ -346,8 +349,15 @@ glt <- autoplot(elec.conso.monthly.ts.train, series = "Entrainement") +
         axis.line = element_line(colour = "black"))
 ```
 
+```{r}
+# bb.res <- checkresiduals(bb.mod)
+# hw.res <- checkresiduals(hw.mod)
+# am.res <- checkresiduals(am.mod)
+```
+
 La _Table 1_ présentant les erreurs induitent par ces modèles révèle que SARIMA est globalement le plus performant, tant sur l'estimation que la prédiction. Nous pouvons noter que les deux autres modèles ont donné des résultats similaires, mais en nécessitant l'estimation de plus de paramètres. Il est surprenant de constater que Holt-Winters a souvent moins bien performé que Buys-Ballot, peut-être en raison du caractère stationnaire de la série. \
-Sur la _Figure 5_ nous pouvons constater que le profil des prédictions est, lui aussi, semblable pour tous les modèles.
+Sur la _Figure 5_ nous pouvons constater que le profil des prédictions est, lui aussi, semblable pour tous les modèles. \
+En nous basant sur le test du porte-manteau de Ljung et l'analyse de l'ACF nous avons vérifié que les résidus obtenus par ces modèles correspondent tous à un bruit-blanc.
 
 ```{r, results = T}
 knitr::kable(acc, caption = "RMSE et MAPE des modèles CT, MT et LT de la consommation électrique")
@@ -361,9 +371,9 @@ ggarrange(gct,
 
 ### 1.3.2. Multi saisonnier
 
-TBATS est un modèle très répandu pour la prédiction de séries temporelles ayant plusieurs saisonnalités. Malheureusement TBATS construit et évalue plusieurs modèles potentiels pour choisir le meilleur en se basant sur l'AIC et cette sélection de modèles implique un coût de calcul important. \
+TBATS est un modèle très répandu pour la prédiction de séries temporelles ayant plusieurs saisonnalités \cite{tbats}. Malheureusement TBATS construit et évalue plusieurs modèles potentiels pour choisir le meilleur en se basant sur l'AIC et cette sélection de modèles implique un coût de calcul important. \
 Une alternative est d'utiliser un modèle ARIMA, non saisonnier, mais en spécifiant des régresseurs permettant de modéliser les saisonnalités. Les régresseurs de chaque saisonnalité sont les termes d'une série de Fourier approchant la saisonnalité en question. Ici encore, déterminer le nombre de termes de Fourier à considérer pour modéliser les saisonnalités est coûteux. \
-Une approche plus naive est moins gourmande peut être mise en oeuvre : utiliser la décomposition STL (voir _Figure 4_) pour re-saisonnaliser la prédiction faite sur la tendance.
+Une approche plus naive et moins gourmande peut être mise en oeuvre : utiliser la décomposition STL (voir _Figure 4_) pour re-saisonnaliser la prédiction faite sur la tendance.
 
 Nous avons mis en oeuvre les trois approches en utilisant les données horaires de 2015 à 2018 pour l'entrainement et de 2019 pour le test et en considérant trois saisonnalités : journalière, hebdomadaire et annuelle.
 
@@ -414,7 +424,14 @@ acc <- data.frame(Entrainement = c(paste0(formatC(stlm.acc[1, "RMSE"], digits = 
                   row.names = c("Multi STL", "ARIMA + Fourier regresseurs", "TBATS"))
 ```
 
-Comme nous pouvons le voir sur la _Table 2_ et la _Figure 6_ les trois modèles proposent des résultats assez proches, et de manière surprenante c'est STL, le modèle le moins coûteux, qui fait légèrement mieux, nous la privilégierons donc fortement. Globalement la prédiction est très bonne : à peine plus de 5% d'erreur moyenne absolue avec un horizon d'un an et un pas horaire !
+```{r}
+# tbats.res <- checkresiduals(tbats.mod)
+# stlm.res <- checkresiduals(stlm.mod)
+# msar.res <- checkresiduals(msar.mod)
+```
+
+Comme nous pouvons le voir sur la _Table 2_ et la _Figure 6_ les trois modèles proposent des résultats assez proches, et de manière surprenante c'est STL, le modèle le moins coûteux, qui fait légèrement mieux, nous la privilégierons donc fortement. Globalement la prédiction est très bonne : à peine plus de 5% d'erreur moyenne absolue avec un horizon d'un an et un pas horaire ! \
+Contrairement aux modèles uni saisonniers, les résidus ne peuvent être apparentés à un bruit-blanc aussi il pourrait être envisagé de tenter d'améliorer les prédictions en les modélisant par des processus (S)AR(I)MA.
 
 ```{r, results = T}
 knitr::kable(acc, caption = "RMSE et MAPE des modèles prédictifs multi saisonnier de la consommation électrique")
@@ -506,7 +523,7 @@ Via l'analyse des ACF aux fréquences horaire, journalière et mensuelle nous av
 
 ## 2.2. Analyse des composantes déterministes : tendance et saisonnalité(s)
 
-La décomposition STL permet de bien extraire les composante saisonnaières journalière et hebdomadaire. Cependant, probablement en raison de fortes fluctuations pouvant s'apparenter à du bruit, la composante annuelle est moins claire que celle de la consommation d'électricité. Nous avons souhaité mettre en lumière ces points via la _Figure 7_.
+La décomposition STL permet de bien extraire les composantes saisonnières journalière et hebdomadaire. Cependant, probablement en raison de fortes fluctuations pouvant s'apparenter à du bruit, la composante annuelle est moins claire que celle de la consommation d'électricité. Nous avons souhaité mettre en lumière ces points via la _Figure 7_.
 
 ```{r}
 elec.swap.multi.ts <- msts(elec.swap.df$swap, start = c(2015, 1), 
@@ -886,9 +903,9 @@ ggarrange(gh, ggarrange(gd, gm, ncol = 2, nrow = 1,
           ncol = 1, nrow = 2)
 ```
 
-Cependant, la _Figure 10_ suggère un lien entre l'évolution de la consommation et du prix. Nous pourrions donc être intéressé par la prédiction du prix de l'électricité en se basant sur la consommation ou la prédiction de la consommation.
+Cependant, la _Figure 10_ suggère un lien entre les évolutions de la consommation et du prix. Nous pourrions donc être intéressé par la prédiction du prix de l'électricité en se basant sur la consommation ou la prédiction de la consommation.
 
-Pour nous assurer de l'existence de ce lien nous pouvons calculer la distance entre les deux séries en se basant sur leur cross-corrélation, afin de s'intéresser aux variations plutôt qu'aux valeurs prises. Un test de causalité de Granger, dont l'hypothèse nulle est que le modèle $y \sim Lags(y, k) + Lags(x, k)$ ne donne pas plus de puissance que le modèle $y \sim Lags(y, k)$ (donc qu'il n'y a pas de causalité) pourrait également nous servir.
+Pour nous assurer de l'existence de ce lien, nous pouvons calculer la distance entre les deux séries en se basant sur leur cross-corrélation, afin de s'intéresser aux variations plutôt qu'aux valeurs prises. Un test de causalité de Granger \cite{granger}, dont l'hypothèse nulle est que le modèle $y \sim Lags(y, k) + Lags(x, k)$ ne donne pas plus de puissance que le modèle $y \sim Lags(y, k)$ (donc qu'il n'y a pas de causalité) pourrait également nous servir.
 
 ```{r}
 CCor.dist <- CCorDistance(elec.swap.df$swap, elec.conso.df$conso)
