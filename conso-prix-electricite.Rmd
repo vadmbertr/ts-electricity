@@ -38,7 +38,7 @@ load("data/conso-elec.Rda")
 # Introduction
 
 Nous avons choisi d'observer le prix du mégawattheure d'électricité sur le marché boursier français en euros (€/MWh) et la consommation électrique en mégawattheure (MWh) en France entre 2015 et 2021. Ces données sont mises à disposition par RTE (le gestionnaire français du Réseau de Transport d'Electricité) au pas horaire. \
-Nous avons exclu les années 2020 et 2021 de l'étude en raison de la crise du COVID-19 qui a entraîné une forte chute de la consommation en 2020, probablement en raison du ralentissement économique ; et de la crise énergétique dans laquelle nous nous trouvons actuellement, démarrée en 2021, qui  a engendré une hausse spectaculaire du prix de l'électricité. La _Figure 1_ met en avant ces variations par un lissage des données sur une année glissante.
+Nous avons exclu les années 2020 et 2021 de l'étude en raison de la crise du COVID-19 qui a entraîné une forte chute de la consommation en 2020, probablement en raison du ralentissement économique ; et de la crise énergétique dans laquelle nous nous trouvons actuellement, démarrée en 2021, qui  a engendré une hausse spectaculaire du prix de l'électricité. La _Figure 1_ met en avant ces variations après un lissage des données sur une année glissante.
 
 ```{r}
 elec.swap.full.df <- elec.swap.df
@@ -69,7 +69,7 @@ gc <- autoplot(ts(rollmean(elec.conso.full.df$conso,
 ggarrange(gc, gp, ncol = 2)
 ```
 
-Pour chacune des deux séries temporelles, notre étude s'intéressera tout d'abord à la détection d'une tendance et des saisonnalités, puis au choix d'un modèle permettant d'estimer et de prédire convenablement ces séries. Enfin nous essaierons d'identifier un lien entre les deux séries.
+Pour chacune des deux séries temporelles, notre étude s'intéressera tout d'abord à la détection d'une tendance et des saisonnalités, puis au choix d'un modèle d'estimation et de prédiction convenable. Enfin nous essaierons d'identifier un lien entre les deux séries.
 
 # 1. Consommation électrique
 
@@ -151,7 +151,7 @@ ggarrange(gh, ggarrange(gd, gm, ncol = 2, nrow = 1), ncol = 1, nrow = 2)
 
 ## 1.2. Analyse des composantes déterministes : tendance et saisonnalité(s)
 
-Afin de considérer les saisonnalités journalière et hebdomadaire en plus de la saisonnalité annuelle nous avons appliqué la décomposition STL estimant successivement plusieurs composantes saisonnales en utilisant la méthode de régression _LOESS_ \cite{loess}. _LOESS_ estime dans un premier temps chaque point par une régression linéaire ou polynomiale faite sur une fenêtre glissante centrée et pénalisant les points utilisés dans la régression en fonction de leur distance au point d'estimation. L'opération est répétée en pénalisant cette fois-ci également par la distance entre la valeur initiale et la première estimation, ce qui permet de réduire la sensibilité aux valeurs anormales.
+Afin de considérer les saisonnalités journalière et hebdomadaire en plus de la saisonnalité annuelle nous avons appliqué la décomposition STL estimant successivement plusieurs composantes saisonnales en utilisant la méthode de régression _LOESS_ \cite{loess}. _LOESS_ estime dans un premier temps chaque point par une régression linéaire ou polynomiale faite sur une fenêtre glissante centrée et pénalisant les points utilisés dans la régression en fonction de leur distance temporelle au point d'estimation. L'opération est répétée en pénalisant cette fois-ci également par la distance entre la valeur initiale et la première estimation, ce qui permet de réduire la sensibilité aux valeurs anormales.
 
 ```{r}
 elec.conso.multi.ts <- msts(elec.conso.df$conso, start = c(2015, 1), 
@@ -174,7 +174,7 @@ La _Figure 4_ présente deux décompositions : sur la période 2015-2019 nous ob
 
 ## 1.3. Comparaison de différents modèles d'estimation
 
-Maintenant que nous avons caractérisé la partie déterministe du signal, nous allons expérimenter plusieurs modèles d'estimation. Pour ce faire nous avons divisé notre série en un jeu d'entrainement et un jeu de test puis nous évaluerons la performance des modèles sur les données de test. \
+Maintenant que nous avons caractérisé la partie déterministe du signal, nous allons expérimenter plusieurs modèles d'estimation. Pour ce faire nous avons divisé notre série en un jeu d'entrainement et un jeu de test sur lequel nous avons évalué la performance des modèles. \
 Nous nous intéresserons à quatre types de modèles différents : 
 
 - ___court terme___ (CT) prenant en compte la saisonnalité journalière
@@ -372,7 +372,7 @@ ggarrange(gct,
 ### 1.3.2. Multi saisonnier
 
 TBATS est un modèle très répandu pour la prédiction de séries temporelles ayant plusieurs saisonnalités \cite{tbats}. Malheureusement TBATS construit et évalue plusieurs modèles potentiels pour choisir le meilleur en se basant sur l'AIC et cette sélection de modèles implique un coût de calcul important. \
-Une alternative est d'utiliser un modèle ARIMA, non saisonnier, mais en spécifiant des régresseurs permettant de modéliser les saisonnalités. Les régresseurs de chaque saisonnalité sont les termes d'une série de Fourier approchant la saisonnalité en question. Ici encore, déterminer le nombre de termes de Fourier à considérer pour modéliser les saisonnalités est coûteux. \
+Une alternative est d'utiliser un modèle ARIMA, non saisonnier, mais en spécifiant des régresseurs permettant de modéliser les saisonnalités \cite{arima}. Les régresseurs de chaque saisonnalité sont les termes d'une série de Fourier approchant la saisonnalité en question. Ici encore, déterminer le nombre de termes de Fourier à considérer pour modéliser les saisonnalités est coûteux. \
 Une approche plus naive et moins gourmande peut être mise en oeuvre : utiliser la décomposition STL (voir _Figure 4_) pour re-saisonnaliser la prédiction faite sur la tendance.
 
 Nous avons mis en oeuvre les trois approches en utilisant les données horaires de 2015 à 2018 pour l'entrainement et de 2019 pour le test et en considérant trois saisonnalités : journalière, hebdomadaire et annuelle.
@@ -430,7 +430,7 @@ acc <- data.frame(Entrainement = c(paste0(formatC(stlm.acc[1, "RMSE"], digits = 
 # msar.res <- checkresiduals(msar.mod)
 ```
 
-Comme nous pouvons le voir sur la _Table 2_ et la _Figure 6_ les trois modèles proposent des résultats assez proches, et de manière surprenante c'est STL, le modèle le moins coûteux, qui fait légèrement mieux, nous la privilégierons donc fortement. Globalement la prédiction est très bonne : à peine plus de 5% d'erreur moyenne absolue avec un horizon d'un an et un pas horaire ! \
+Comme nous pouvons le voir sur la _Table 2_ et la _Figure 6_ les trois modèles proposent des résultats assez proches, et de manière surprenante c'est STL, le modèle le moins coûteux, qui fait légèrement mieux, nous le privilégierons donc fortement. Globalement la prédiction est très bonne : à peine plus de 5% d'erreur moyenne absolue avec un horizon d'un an et un pas horaire ! \
 Contrairement aux modèles uni saisonniers, les résidus ne peuvent être apparentés à un bruit-blanc aussi il pourrait être envisagé de tenter d'améliorer les prédictions en les modélisant par des processus (S)AR(I)MA.
 
 ```{r, results = T}
